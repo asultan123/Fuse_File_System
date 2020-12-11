@@ -20,13 +20,16 @@
 
 #include "fs5600.h"
 
+#define MAX_PATH_LEN 10
+#define MAX_NAME_LEN 27
+
 /* if you don't understand why you can't use these system calls here, 
  * you need to read the assignment description another time
  */
-#define stat(a,b) error do not use stat()
-#define open(a,b) error do not use open()
-#define read(a,b,c) error do not use read()
-#define write(a,b,c) error do not use write()
+#define stat(a, b) error do not use stat()
+#define open(a, b) error do not use open()
+#define read(a, b, c) error do not use read()
+#define write(a, b, c) error do not use write()
 
 /* disk access. All access is in terms of 4KB blocks; read and
  * write functions return 0 (success) or -EIO.
@@ -34,31 +37,78 @@
 extern int block_read(void *buf, int lba, int nblks);
 extern int block_write(void *buf, int lba, int nblks);
 
+int parse(char *path, char **argv)
+{
+    int i;
+    for (i = 0; i < MAX_PATH_LEN; i++)
+    {
+        if ((argv[i] = strtok(path, "/")) == NULL)
+        {
+            break;
+        }
+        if (strlen(argv[i]) > MAX_NAME_LEN)
+        {
+            argv[i][MAX_NAME_LEN] = 0; // truncate to 27 characters
+        }
+        path = NULL;
+    }
+    return i;
+}
+
+int translate(int pathc, char **pathv)
+{
+//     inum = 2              // root inode
+// for i = 0..pathc-1 :
+// read inum -> _in
+// if _in.mode isn't a directory:
+//     return -ENOTDIR
+// read the directory entries
+// search for names[i]
+// found:
+//   inum = dirent.inum
+// not found:
+//   return -ENOENT
+    int start_inode=2;
+    for(int i = 0; i<pathc-1; i++)
+    {
+
+    }
+
+}
+
 /* bitmap functions
  */
 void bit_set(unsigned char *map, int i)
 {
-    map[i/8] |= (1 << (i%8));
+    map[i / 8] |= (1 << (i % 8));
 }
 void bit_clear(unsigned char *map, int i)
 {
-    map[i/8] &= ~(1 << (i%8));
+    map[i / 8] &= ~(1 << (i % 8));
 }
 int bit_test(unsigned char *map, int i)
 {
-    return map[i/8] & (1 << (i%8));
+    return map[i / 8] & (1 << (i % 8));
 }
 
 
+struct fs_super superblock;
+struct fs_inode rootInode;
+unsigned char bitmap[FS_BLOCK_SIZE];
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
  * recommended actions:
  *   - read superblock
  *   - allocate memory, block allocation bitmap
  */
-void* fs_init(struct fuse_conn_info *conn)
+void *fs_init(struct fuse_conn_info *conn)
 {
     /* your code here */
+    char buf[FS_BLOCK_SIZE];
+    if(block_read(buf,0,FS_BLOCK_SIZE) == -EIO)
+    {
+        
+    }
     return NULL;
 }
 
@@ -83,8 +133,6 @@ void* fs_init(struct fuse_conn_info *conn)
  *    int inum = translate(_path);
  *    free(_path);
  */
-
-
 
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
@@ -118,7 +166,7 @@ int fs_getattr(const char *path, struct stat *sb)
  *        to call the filler function
  */
 int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi)
+               off_t offset, struct fuse_file_info *fi)
 {
     /* your code here */
     return -EOPNOTSUPP;
@@ -152,13 +200,12 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  * success - return 0
  * Errors - path resolution, EEXIST
  * Conditions for EEXIST are the same as for create. 
- */ 
+ */
 int fs_mkdir(const char *path, mode_t mode)
 {
     /* your code here */
     return -EOPNOTSUPP;
 }
-
 
 /* unlink - delete a file
  *  success - return 0
@@ -233,12 +280,11 @@ int fs_truncate(const char *path, off_t len)
      * and an error otherwise.
      */
     if (len != 0)
-	return -EINVAL;		/* invalid argument */
+        return -EINVAL; /* invalid argument */
 
     /* your code here */
     return -EOPNOTSUPP;
 }
-
 
 /* read - read data from an open file.
  * success: should return exactly the number of bytes requested, except:
@@ -248,7 +294,7 @@ int fs_truncate(const char *path, off_t len)
  * Errors - path resolution, ENOENT, EISDIR
  */
 int fs_read(const char *path, char *buf, size_t len, off_t offset,
-	    struct fuse_file_info *fi)
+            struct fuse_file_info *fi)
 {
     /* your code here */
     return -EOPNOTSUPP;
@@ -263,7 +309,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
  *   but we don't)
  */
 int fs_write(const char *path, const char *buf, size_t len,
-	     off_t offset, struct fuse_file_info *fi)
+             off_t offset, struct fuse_file_info *fi)
 {
     /* your code here */
     return -EOPNOTSUPP;
@@ -292,7 +338,7 @@ int fs_statfs(const char *path, struct statvfs *st)
 /* operations vector. Please don't rename it, or else you'll break things
  */
 struct fuse_operations fs_ops = {
-    .init = fs_init,            /* read-mostly operations */
+    .init = fs_init, /* read-mostly operations */
     .getattr = fs_getattr,
     .readdir = fs_readdir,
     .rename = fs_rename,
@@ -300,7 +346,7 @@ struct fuse_operations fs_ops = {
     .read = fs_read,
     .statfs = fs_statfs,
 
-    .create = fs_create,        /* write operations */
+    .create = fs_create, /* write operations */
     .mkdir = fs_mkdir,
     .unlink = fs_unlink,
     .rmdir = fs_rmdir,
@@ -308,4 +354,3 @@ struct fuse_operations fs_ops = {
     .truncate = fs_truncate,
     .write = fs_write,
 };
-
