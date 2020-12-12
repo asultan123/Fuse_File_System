@@ -243,7 +243,7 @@ int fs_getattr(const char *path, struct stat *sb)
 {
     /* your code here */
     struct fs_inode *inode;
-    int status = path_to_inode(path, &inode, 1);
+    int status = path_to_inode(path, &inode, 0);
     if (status != 0)
     {
         return status;
@@ -356,6 +356,53 @@ int fs_rmdir(const char *path)
     return -EOPNOTSUPP;
 }
 
+
+int file_dir(struct fs_dirent** dir, struct fs_dirent** resolvedEntry, const char* file_path)
+{
+    int status;
+    struct fs_inode* fileDirInode;
+    if((status = path_to_inode(file_path, &fileDirInode, 1)) < 0)
+    {
+        return status;
+    }
+    *dir = malloc(sizeof(struct fs_dirent)*MAX_DIR_ENTRIES_PER_BLOCK);
+    int fileDirBlockLBA = fileDirInode->ptrs[0];
+    if((status = block_read((*dir), fileDirBlockLBA, 1)) < 0)
+    {
+        return status;
+    }
+
+    char *_path = strdup(file_path);
+    char *argv[MAX_PATH_LEN];
+    int pathc = parse(_path, argv);
+    char* filename = argv[pathc-1];
+    *resolvedEntry = NULL;
+    int dirEntry;
+    for(dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
+    {
+        if((*dir)[dirEntry].valid)
+        {
+            if(strcmp((*dir)[dirEntry].name, filename) == 0)
+            {
+                *resolvedEntry = &((*dir)[dirEntry]);
+                break;
+            }
+        }
+    }
+    free(_path);
+    free(fileDirInode);
+    if(resolvedEntry == NULL)
+    {
+        free(*dir);
+        *dir = NULL;
+        return -ENOENT;
+    }
+    else
+    {
+        return fileDirBlockLBA;
+    }
+}
+
 /* rename - rename a file or directory
  * success - return 0
  * Errors - path resolution, ENOENT, EINVAL, EEXIST
@@ -374,13 +421,13 @@ int fs_rename(const char *src_path, const char *dst_path)
     /* your code here */
     struct fs_inode* sinode;
     int sinum;
-    if((sinum = path_to_inode(src_path, &sinode, 1)) < 0)
+    if((sinum = path_to_inode(src_path, &sinode, 0)) < 0)
     {
         return sinum;
     }
     struct fs_inode* dinode;
     int dinum;
-    if((dinum = path_to_inode(src_path, &dinode, 1)) >= 0)
+    if((dinum = path_to_inode(src_path, &dinode, 0)) >= 0)
     {
         return -EEXIST;
     }
@@ -406,11 +453,29 @@ int fs_rename(const char *src_path, const char *dst_path)
         }
     }
 
+    struct fs_dirent* sfileDirEntry;
+    struct fs_dirent* sfileDirBlock;
+    int sfileDirLBA;
+
+    if((sfileDirLBA = file_dir(&sfileDirBlock, &sfileDirEntry, src_path)) < 0)
+    {
+        return sfileDirLBA;
+    }
+
+    memset(sfileDirEntry->name, 0, sizeof(sfileDirEntry->name));
+    strncpy(sfileDirEntry->name, dargv[dpathc-1], MAX_NAME_LEN);
+
+    int status;
+    if((status = block_write(sfileDirBlock, sfileDirLBA, 1)) < 0)
+    {
+        return status;
+    }
+
     free(sinode);
     free(dinode);
     free(_spath);
     free(_dpath);
-    return -EOPNOTSUPP;
+    return 0;
 }
 
 /* chmod - change file permissions
@@ -423,7 +488,7 @@ int fs_chmod(const char *path, mode_t mode)
     /* your code here */
     struct fs_inode *finode;
     int inum;
-    if ((inum = path_to_inode(path, &finode, 1)) < 0)
+    if ((inum = path_to_inode(path, &finode, 0)) < 0)
     {
         return inum;
     }
@@ -433,7 +498,7 @@ int fs_chmod(const char *path, mode_t mode)
     }
     finode->mode = mode;
     int status;
-    if((status = block_write(finode, inum, 1)) < 0)
+    if((status = block_write(finode, inum, 0)) < 0)
     { 
         return status;
     }
@@ -483,7 +548,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     /* your code here */
     struct fs_inode *finode;
     int status;
-    if ((status = path_to_inode(path, &finode, 1)) < 0)
+    if ((status = path_to_inode(path, &finode, 0)) < 0)
     {
         return status;
     }
