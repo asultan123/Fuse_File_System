@@ -186,7 +186,14 @@ int parse(char *path, char **argv)
 
 int inode_to_stat(struct fs_inode* inode, struct stat *sb)
 {
-    
+    sb->st_mode = inode->mode;
+    sb->st_uid = inode->uid;
+    sb->st_gid = inode->gid;
+    sb->st_size = inode->size;
+    sb->st_ctime = inode->ctime; // weird comment below
+    sb->st_mtime = inode->mtime;
+    sb->st_atime = inode->mtime;
+    sb->st_nlink = 1;
 }
 
 /* getattr - get file or directory attributes. For a description of
@@ -205,7 +212,22 @@ int inode_to_stat(struct fs_inode* inode, struct stat *sb)
 int fs_getattr(const char *path, struct stat *sb)
 {
     /* your code here */
-    return -EOPNOTSUPP;
+    char *_path = strdup(path);
+    char* argv[MAX_PATH_LEN];
+    int pathc = parse(_path, argv);
+    int inum;
+    if((inum = translate(pathc, argv)) < 0)
+    {
+        return inum;
+    }
+    struct fs_inode inode;
+    if(block_read(&inode, inum, FS_BLOCK_SIZE) <0)
+    {
+        return -EIO;
+    }
+    inode_to_stat(&inode, sb);
+    free(_path);
+    return 0;
 }
 
 /* readdir - get directory contents.
@@ -352,6 +374,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
             struct fuse_file_info *fi)
 {
     /* your code here */
+    
     return -EOPNOTSUPP;
 }
 
@@ -386,8 +409,9 @@ int fs_statfs(const char *path, struct statvfs *st)
      * it's OK to calculate this dynamically on the rare occasions
      * when this function is called.
      */
+    st = &statVfs;
     /* your code here */
-    return -EOPNOTSUPP;
+    return 0;
 }
 
 /* operations vector. Please don't rename it, or else you'll break things
