@@ -55,7 +55,7 @@ int bit_test(unsigned char *map, int i)
 
 struct fs_super superblock;
 struct fs_inode rootInode;
-unsigned char bitmap[FS_BLOCK_SIZE];
+unsigned char bitmap[FS_BLOCK_SIZE] = {0};
 struct statvfs statVfs;
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
@@ -85,12 +85,12 @@ void *fs_init(struct fuse_conn_info *conn)
 
     statVfs.f_bsize = FS_BLOCK_SIZE;
     statVfs.f_blocks = superblock.disk_size - 2;
-    unsigned int blocksUsed = 0;
-    for (int i = 0; i < FS_BLOCK_SIZE; i++)
+    unsigned int blocksFree = 0;
+    for (int i = 0; i < superblock.disk_size; i++)
     {
-        blocksUsed += bit_test(bitmap, i);
+        blocksFree += ((bit_test(bitmap, i) == 0)? 1 : 0);
     }
-    statVfs.f_bfree = statVfs.f_blocks - blocksUsed;
+    statVfs.f_bfree = blocksFree;
     statVfs.f_bavail = statVfs.f_bfree;
     statVfs.f_namemax = MAX_NAME_LEN;
 
@@ -98,9 +98,9 @@ void *fs_init(struct fuse_conn_info *conn)
     printf("INFO: Block Size: %u\n", FS_BLOCK_SIZE);
     printf("INFO: Disk MAGIC: %u\n", superblock.magic);
     printf("INFO: Disk Size: %u\n", superblock.disk_size);
-    printf("INFO: Blocks Used: %u\n", superblock.disk_size);
-    printf("INFO: Blocks Available: %u\n", superblock.disk_size);
-    printf("INFO: Blocks Free: %u\n", superblock.disk_size);
+    printf("INFO: Blocks Used: %u\n", superblock.disk_size-blocksFree);
+    printf("INFO: Blocks Available: %lu\n", statVfs.f_bfree);
+    printf("INFO: Blocks Free: %lu\n", statVfs.f_bfree);
 
     return NULL;
 }
@@ -139,7 +139,7 @@ int translate(int pathc, char **pathv, int depth)
         }
         for (int dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
         {
-            if (curDir[dirEntry].valid && strcmp(pathv[pathToken], curDir[dirEntry].name))
+            if (curDir[dirEntry].valid && strcmp(pathv[pathToken], curDir[dirEntry].name) == 0)
             {
                 inodeIndex = curDir[dirEntry].inode;
                 break;
@@ -211,7 +211,7 @@ int path_to_inode(const char *path, struct fs_inode **inode, int depth)
     char *_path = strdup(path);
     char *argv[MAX_PATH_LEN];
     int pathc = parse(_path, argv);
-    uint32_t inum;
+    int inum;
     if ((inum = translate(pathc, argv, depth)) < 0)
     {
         return inum;
@@ -243,8 +243,8 @@ int fs_getattr(const char *path, struct stat *sb)
 {
     /* your code here */
     struct fs_inode *inode;
-    int status = path_to_inode(path, &inode, 0);
-    if (status != 0)
+    int status;
+    if ((status = path_to_inode(path, &inode, 0)) < 0)
     {
         return status;
     }
@@ -566,6 +566,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     if (offset + len > fileLen)
     {
         readEndBlock = fileSizeInBlocks;
+        len = fileLen;
     }
 
     int readBlockCount = readEndBlock - readStartBlock + 1;
@@ -588,7 +589,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
 
     free(blkBuf);
     free(finode);
-    return 0;
+    return len;
 }
 
 /* write - write data to a file
@@ -622,7 +623,7 @@ int fs_statfs(const char *path, struct statvfs *st)
      * it's OK to calculate this dynamically on the rare occasions
      * when this function is called.
      */
-    st = &statVfs;
+    memcpy(st, &statVfs, sizeof(struct statvfs));
     /* your code here */
     return 0;
 }
