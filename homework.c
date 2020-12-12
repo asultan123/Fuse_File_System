@@ -37,45 +37,6 @@
 extern int block_read(void *buf, int lba, int nblks);
 extern int block_write(void *buf, int lba, int nblks);
 
-int parse(char *path, char **argv)
-{
-    int i;
-    for (i = 0; i < MAX_PATH_LEN; i++)
-    {
-        if ((argv[i] = strtok(path, "/")) == NULL)
-        {
-            break;
-        }
-        if (strlen(argv[i]) > MAX_NAME_LEN)
-        {
-            argv[i][MAX_NAME_LEN] = 0; // truncate to 27 characters
-        }
-        path = NULL;
-    }
-    return i;
-}
-
-int translate(int pathc, char **pathv)
-{
-    //     inum = 2              // root inode
-    // for i = 0..pathc-1 :
-    // read inum -> _in
-    // if _in.mode isn't a directory:
-    //     return -ENOTDIR
-    // read the directory entries
-    // search for names[i]
-    // found:
-    //   inum = dirent.inum
-    // not found:
-    //   return -ENOENT
-    // int start_inode = 2;
-    struct fs_inode* curInode = &rootInode;
-    for (int i = 0; i < pathc - 1; i++)
-    {
-        
-    }
-    return 0;
-}
 
 /* bitmap functions
  */
@@ -153,6 +114,46 @@ void *fs_init(struct fuse_conn_info *conn)
  * ENOTDIR - an intermediate component of the path (e.g. 'b' in
  *           /a/b/c) is not a directory
  */
+int translate(int pathc, char **pathv)
+{
+    struct fs_inode curInode;
+    // MAX 128 entries in a directory assumption
+    struct fs_dirent curDir[128];
+    int inodeIndex = 2;
+    for (int pathToken = 0; pathToken < pathc - 1; pathToken++)
+    {
+        if(!block_read(&curInode, inodeIndex, 1))
+        {
+            return -EIO;
+        }
+        if(!S_ISDIR(curInode.mode))
+        {
+            return -ENOTDIR;
+        }
+        // MAX 128 entries in a directory assumption
+        if(!block_read(&curDir, curInode.ptrs[0], 1))
+        {
+            return -EIO;
+        }
+        for(int dirEntry = 0; dirEntry < 128; dirEntry++)
+        {
+            if(curDir[dirEntry].valid && strcmp(pathv[pathToken], curDir[dirEntry].name))
+            {
+                inodeIndex = curDir[dirEntry].inode;
+                break;
+            }
+            else
+            {
+                inodeIndex = -1;
+            }
+        }
+        if(inodeIndex == -1)
+        {
+            return -ENOENT;
+        }
+    }
+    return inodeIndex;
+}
 
 /* note on splitting the 'path' variable:
  * the value passed in by the FUSE framework is declared as 'const',
@@ -165,6 +166,28 @@ void *fs_init(struct fuse_conn_info *conn)
  *    int inum = translate(_path);
  *    free(_path);
  */
+int parse(char *path, char **argv)
+{
+    int i;
+    for (i = 0; i < MAX_PATH_LEN; i++)
+    {
+        if ((argv[i] = strtok(path, "/")) == NULL)
+        {
+            break;
+        }
+        if (strlen(argv[i]) > MAX_NAME_LEN)
+        {
+            argv[i][MAX_NAME_LEN] = 0; // truncate to 27 characters
+        }
+        path = NULL;
+    }
+    return i;
+}
+
+int inode_to_stat(struct fs_inode* inode, struct stat *sb)
+{
+    
+}
 
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
