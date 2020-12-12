@@ -22,6 +22,7 @@
 
 #define MAX_PATH_LEN 10
 #define MAX_NAME_LEN 27
+#define MAX_DIR_ENTRIES_PER_BLOCK 128
 
 /* if you don't understand why you can't use these system calls here, 
  * you need to read the assignment description another time
@@ -36,7 +37,6 @@
  */
 extern int block_read(void *buf, int lba, int nblks);
 extern int block_write(void *buf, int lba, int nblks);
-
 
 /* bitmap functions
  */
@@ -67,26 +67,27 @@ void *fs_init(struct fuse_conn_info *conn)
 {
     /* your code here */
     char buf[FS_BLOCK_SIZE];
-    if (block_read(&superblock, 0, FS_BLOCK_SIZE) == -EIO)
+    int status;
+    if ((status = block_read(&superblock, 0, 1)) < 0)
     {
         printf("ERROR: Failed to load superblock\n");
-        return (void*)-EIO;
+        return (void *)status;
     }
-    if (block_read(&bitmap, 1, FS_BLOCK_SIZE) == -EIO)
+    if ((status = block_read(&bitmap, 1, 1)) < 0)
     {
         printf("ERROR: Failed to load bitmap\n");
-        return (void*)-EIO;
+        return (void *)status;
     }
-    if (block_read(&rootInode, 2, FS_BLOCK_SIZE) == -EIO)
+    if ((status = block_read(&rootInode, 2, 1)) < 0)
     {
         printf("ERROR: Failed to load rootInode\n");
-        return (void*)-EIO;
+        return (void *)status;
     }
 
     statVfs.f_bsize = FS_BLOCK_SIZE;
     statVfs.f_blocks = superblock.disk_size - 2;
     unsigned int blocksUsed = 0;
-    for(int i = 0; i<FS_BLOCK_SIZE; i++)
+    for (int i = 0; i < FS_BLOCK_SIZE; i++)
     {
         blocksUsed += bit_test(bitmap, i);
     }
@@ -114,30 +115,32 @@ void *fs_init(struct fuse_conn_info *conn)
  * ENOTDIR - an intermediate component of the path (e.g. 'b' in
  *           /a/b/c) is not a directory
  */
-int translate(int pathc, char **pathv)
+int translate(int pathc, char **pathv, int depth)
 {
+    int status;
     struct fs_inode curInode;
     // MAX 128 entries in a directory assumption
-    struct fs_dirent curDir[128];
+    struct fs_dirent curDir[MAX_DIR_ENTRIES_PER_BLOCK];
     int inodeIndex = 2;
-    for (int pathToken = 0; pathToken < pathc - 1; pathToken++)
+    depth = depth & MAX_PATH_LEN;
+    for (int pathToken = 0; pathToken < pathc - depth; pathToken++)
     {
-        if(!block_read(&curInode, inodeIndex, 1))
+        if ((status = block_read(&curInode, inodeIndex, 1)) < 0)
         {
-            return -EIO;
+            return status;
         }
-        if(!S_ISDIR(curInode.mode))
+        if (!S_ISDIR(curInode.mode))
         {
             return -ENOTDIR;
         }
         // MAX 128 entries in a directory assumption
-        if(!block_read(&curDir, curInode.ptrs[0], 1))
+        if ((status = block_read(&curDir, curInode.ptrs[0], 1)) < 0)
         {
-            return -EIO;
+            return status;
         }
-        for(int dirEntry = 0; dirEntry < 128; dirEntry++)
+        for (int dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
         {
-            if(curDir[dirEntry].valid && strcmp(pathv[pathToken], curDir[dirEntry].name))
+            if (curDir[dirEntry].valid && strcmp(pathv[pathToken], curDir[dirEntry].name))
             {
                 inodeIndex = curDir[dirEntry].inode;
                 break;
@@ -147,7 +150,7 @@ int translate(int pathc, char **pathv)
                 inodeIndex = -1;
             }
         }
-        if(inodeIndex == -1)
+        if (inodeIndex == -1)
         {
             return -ENOENT;
         }
@@ -184,7 +187,7 @@ int parse(char *path, char **argv)
     return i;
 }
 
-int inode_to_stat(struct fs_inode* inode, struct stat *sb)
+void inode_to_stat(struct fs_inode *inode, struct stat *sb)
 {
     sb->st_mode = inode->mode;
     sb->st_uid = inode->uid;
@@ -194,6 +197,34 @@ int inode_to_stat(struct fs_inode* inode, struct stat *sb)
     sb->st_mtime = inode->mtime;
     sb->st_atime = inode->mtime;
     sb->st_nlink = 1;
+}
+
+/**
+ * @brief Returns inode containing last entry in path. Last entry can be path or
+ * file.
+ * 
+ * @param path 
+ * @param inode 
+ * @return int 
+ */
+int path_to_inode(const char *path, struct fs_inode **inode, int depth)
+{
+    char *_path = strdup(path);
+    char *argv[MAX_PATH_LEN];
+    int pathc = parse(_path, argv);
+    int inum;
+    if ((inum = translate(pathc, argv, depth)) < 0)
+    {
+        return inum;
+    }
+    *inode = malloc(sizeof(struct fs_inode));
+    int status;
+    if ((status = block_read(*inode, inum, 1)) < 0)
+    {
+        return status;
+    }
+    free(_path);
+    return 0;
 }
 
 /* getattr - get file or directory attributes. For a description of
@@ -212,21 +243,14 @@ int inode_to_stat(struct fs_inode* inode, struct stat *sb)
 int fs_getattr(const char *path, struct stat *sb)
 {
     /* your code here */
-    char *_path = strdup(path);
-    char* argv[MAX_PATH_LEN];
-    int pathc = parse(_path, argv);
-    int inum;
-    if((inum = translate(pathc, argv)) < 0)
+    struct fs_inode *inode;
+    int status = path_to_inode(path, &inode, 1);
+    if (status != 0)
     {
-        return inum;
+        return status;
     }
-    struct fs_inode inode;
-    if(block_read(&inode, inum, FS_BLOCK_SIZE) <0)
-    {
-        return -EIO;
-    }
-    inode_to_stat(&inode, sb);
-    free(_path);
+    inode_to_stat(inode, sb);
+    free(inode);
     return 0;
 }
 
@@ -246,7 +270,36 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
                off_t offset, struct fuse_file_info *fi)
 {
     /* your code here */
-    return -EOPNOTSUPP;
+    struct fs_inode *inode;
+    struct stat fileStat;
+    int status;
+    if ((status = path_to_inode(path, &inode, 0)) < 0)
+    {
+        return status;
+    }
+    if (!(S_ISDIR(inode->mode)))
+    {
+        return -ENOTDIR;
+    }
+    struct fs_dirent curDir[MAX_DIR_ENTRIES_PER_BLOCK];
+    if ((status = block_read(curDir, inode->ptrs[0], 1) < 0))
+    {
+        return status;
+    }
+    for (int dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
+    {
+        if (curDir[dirEntry].valid)
+        {
+            if ((status = block_read(inode, curDir[dirEntry].inode, 1)) < 0)
+            {
+                return status;
+            }
+            inode_to_stat(inode, &fileStat);
+            filler(ptr, curDir[dirEntry].name, &fileStat, offset);
+        }
+    }
+    free(inode);
+    return 0;
 }
 
 /* create - create a new file with specified permissions
@@ -374,7 +427,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
             struct fuse_file_info *fi)
 {
     /* your code here */
-    
+
     return -EOPNOTSUPP;
 }
 
