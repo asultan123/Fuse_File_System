@@ -57,23 +57,24 @@ int parse(char *path, char **argv)
 
 int translate(int pathc, char **pathv)
 {
-//     inum = 2              // root inode
-// for i = 0..pathc-1 :
-// read inum -> _in
-// if _in.mode isn't a directory:
-//     return -ENOTDIR
-// read the directory entries
-// search for names[i]
-// found:
-//   inum = dirent.inum
-// not found:
-//   return -ENOENT
-    int start_inode=2;
-    for(int i = 0; i<pathc-1; i++)
+    //     inum = 2              // root inode
+    // for i = 0..pathc-1 :
+    // read inum -> _in
+    // if _in.mode isn't a directory:
+    //     return -ENOTDIR
+    // read the directory entries
+    // search for names[i]
+    // found:
+    //   inum = dirent.inum
+    // not found:
+    //   return -ENOENT
+    // int start_inode = 2;
+    struct fs_inode* curInode = &rootInode;
+    for (int i = 0; i < pathc - 1; i++)
     {
-
+        
     }
-
+    return 0;
 }
 
 /* bitmap functions
@@ -91,10 +92,10 @@ int bit_test(unsigned char *map, int i)
     return map[i / 8] & (1 << (i % 8));
 }
 
-
 struct fs_super superblock;
 struct fs_inode rootInode;
 unsigned char bitmap[FS_BLOCK_SIZE];
+struct statvfs statVfs;
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
  * recommended actions:
@@ -105,10 +106,41 @@ void *fs_init(struct fuse_conn_info *conn)
 {
     /* your code here */
     char buf[FS_BLOCK_SIZE];
-    if(block_read(buf,0,FS_BLOCK_SIZE) == -EIO)
+    if (block_read(&superblock, 0, FS_BLOCK_SIZE) == -EIO)
     {
-        
+        printf("ERROR: Failed to load superblock\n");
+        return (void*)-EIO;
     }
+    if (block_read(&bitmap, 1, FS_BLOCK_SIZE) == -EIO)
+    {
+        printf("ERROR: Failed to load bitmap\n");
+        return (void*)-EIO;
+    }
+    if (block_read(&rootInode, 2, FS_BLOCK_SIZE) == -EIO)
+    {
+        printf("ERROR: Failed to load rootInode\n");
+        return (void*)-EIO;
+    }
+
+    statVfs.f_bsize = FS_BLOCK_SIZE;
+    statVfs.f_blocks = superblock.disk_size - 2;
+    unsigned int blocksUsed = 0;
+    for(int i = 0; i<FS_BLOCK_SIZE; i++)
+    {
+        blocksUsed += bit_test(bitmap, i);
+    }
+    statVfs.f_bfree = statVfs.f_blocks - blocksUsed;
+    statVfs.f_bavail = statVfs.f_bfree;
+    statVfs.f_namemax = MAX_NAME_LEN;
+
+    printf("INFO: Loaded filesystem with the following proprties:\n");
+    printf("INFO: Block Size: %u\n", FS_BLOCK_SIZE);
+    printf("INFO: Disk MAGIC: %u\n", superblock.magic);
+    printf("INFO: Disk Size: %u\n", superblock.disk_size);
+    printf("INFO: Blocks Used: %u\n", superblock.disk_size);
+    printf("INFO: Blocks Available: %u\n", superblock.disk_size);
+    printf("INFO: Blocks Free: %u\n", superblock.disk_size);
+
     return NULL;
 }
 
