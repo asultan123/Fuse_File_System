@@ -66,8 +66,7 @@ struct statvfs statVfs;
 void *fs_init(struct fuse_conn_info *conn)
 {
     /* your code here */
-    char buf[FS_BLOCK_SIZE];
-    int status;
+    uint64_t status;
     if ((status = block_read(&superblock, 0, 1)) < 0)
     {
         printf("ERROR: Failed to load superblock\n");
@@ -212,7 +211,7 @@ int path_to_inode(const char *path, struct fs_inode **inode, int depth)
     char *_path = strdup(path);
     char *argv[MAX_PATH_LEN];
     int pathc = parse(_path, argv);
-    int inum;
+    uint32_t inum;
     if ((inum = translate(pathc, argv, depth)) < 0)
     {
         return inum;
@@ -224,7 +223,7 @@ int path_to_inode(const char *path, struct fs_inode **inode, int depth)
         return status;
     }
     free(_path);
-    return 0;
+    return inum;
 }
 
 /* getattr - get file or directory attributes. For a description of
@@ -373,6 +372,44 @@ int fs_rmdir(const char *path)
 int fs_rename(const char *src_path, const char *dst_path)
 {
     /* your code here */
+    struct fs_inode* sinode;
+    int sinum;
+    if((sinum = path_to_inode(src_path, &sinode, 1)) < 0)
+    {
+        return sinum;
+    }
+    struct fs_inode* dinode;
+    int dinum;
+    if((dinum = path_to_inode(src_path, &dinode, 1)) >= 0)
+    {
+        return -EEXIST;
+    }
+    
+    char *_spath = strdup(src_path);
+    char *sargv[MAX_PATH_LEN];
+    int spathc = parse(_spath, sargv);
+
+    char *_dpath = strdup(dst_path);
+    char *dargv[MAX_PATH_LEN];
+    int dpathc = parse(_dpath, dargv);
+
+    if(dpathc != spathc)
+    {
+        return -EINVAL;
+    }
+
+    for(int pathToken = 0; pathToken < spathc-1; pathToken++)
+    {
+        if(strcmp(sargv[pathToken], dargv[pathToken]) != 0)
+        {
+            return -EINVAL;
+        }
+    }
+
+    free(sinode);
+    free(dinode);
+    free(_spath);
+    free(_dpath);
     return -EOPNOTSUPP;
 }
 
@@ -384,7 +421,24 @@ int fs_rename(const char *src_path, const char *dst_path)
 int fs_chmod(const char *path, mode_t mode)
 {
     /* your code here */
-    return -EOPNOTSUPP;
+    struct fs_inode *finode;
+    int inum;
+    if ((inum = path_to_inode(path, &finode, 1)) < 0)
+    {
+        return inum;
+    }
+    if(!S_ISREG(mode))
+    {
+        return -EINVAL;
+    }
+    finode->mode = mode;
+    int status;
+    if((status = block_write(finode, inum, 1)) < 0)
+    { 
+        return status;
+    }
+    free(finode);
+    return 0;
 }
 
 /* utime - change access and modification times
@@ -427,8 +481,49 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
             struct fuse_file_info *fi)
 {
     /* your code here */
+    struct fs_inode *finode;
+    int status;
+    if ((status = path_to_inode(path, &finode, 1)) < 0)
+    {
+        return status;
+    }
+    int fileLen = finode->size;
+    if (offset >= fileLen)
+    {
+        return 0;
+    }
 
-    return -EOPNOTSUPP;
+    int readStartBlock = offset / FS_BLOCK_SIZE;
+    int readStartOffset = offset % FS_BLOCK_SIZE;
+    int readEndBlock = (offset + len) / FS_BLOCK_SIZE;
+    int fileSizeInBlocks = fileLen / FS_BLOCK_SIZE;
+
+    if (offset + len > fileLen)
+    {
+        readEndBlock = fileSizeInBlocks;
+    }
+
+    int readBlockCount = readEndBlock - readStartBlock + 1;
+    char *blkBuf = calloc(1, sizeof(char) * FS_BLOCK_SIZE * readBlockCount);
+    if(blkBuf == NULL)
+    {
+        return -ENOMEM;
+    }
+
+    int blkIdx = 0;
+    for(int pIdx = readStartBlock; pIdx <= readEndBlock; pIdx++)
+    {
+        if ((status = block_read(blkBuf+(blkIdx++*FS_BLOCK_SIZE), finode->ptrs[pIdx], 1)) < 0)
+        {
+            return status;
+        }
+    }
+
+    memcpy(buf, blkBuf+readStartOffset, len);
+
+    free(blkBuf);
+    free(finode);
+    return 0;
 }
 
 /* write - write data to a file
