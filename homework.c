@@ -323,8 +323,87 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
  */
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    struct fs_inode *dirInode;
+    int status;
+    if ((status = path_to_inode(path, &dirInode, 1)) < 0)
+    {
+        return status;
+    }
+    if(!S_ISDIR(dirInode->mode))
+    {
+        free(dirInode);
+        return -ENOTDIR;
+    }
+    int dirBlockInum = dirInode->ptrs[0];
+    struct fs_dirent dirBlock[MAX_DIR_ENTRIES_PER_BLOCK];
+    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
+    {
+        free(dirInode);
+        return status;
+    }
+
+    char *_path = strdup(path);
+    char *argv[MAX_PATH_LEN];
+    int pathc = parse(_path, argv);
+    char* filename = argv[pathc-1];
+
+    for(int entryIdx = 0; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
+    {
+        if(dirBlock[entryIdx].valid)
+        {
+            if (strcmp(dirBlock[entryIdx].name, filename) == 0)
+            {
+                free(dirInode);
+                free(_path);
+                return -EEXIST;
+            }
+        }
+    }
+
+    int firstAvailableEntry = -1;
+    for(int entryIdx = 0; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
+    {
+        if(!dirBlock[entryIdx].valid)
+        {
+            firstAvailableEntry = entryIdx;
+        }
+    }
+
+    if(firstAvailableEntry == -1)
+    {
+        free(dirInode);
+        free(_path);       
+        return -ENOSPC;
+    }
+
+    int allocatableBlkInum = -1;
+    for(int blkIdx = 0; blkIdx < superblock.disk_size; blkIdx++)
+    {
+        if(bit_test(bitmap, blkIdx) == 0)
+        {
+            allocatableBlkInum = blkIdx;
+        }
+    }
+
+    if(allocatableBlkInum == -1)
+    {
+        free(dirInode);
+        free(_path);       
+        return -ENOSPC;
+    }
+
+    // Create file inode
+    struct fs_inode newfileInode;
+
+    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
+    {
+        free(dirInode);
+        return status;
+    }    
+
+    free(dirInode);
+    free(_path);
+    return 0;    
 }
 
 /* mkdir - create a directory with the given mode.
