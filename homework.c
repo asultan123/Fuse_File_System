@@ -929,6 +929,10 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     {
         return status;
     }
+    if(!S_ISREG(finode->mode))
+    {
+        return -EISDIR;
+    }
     int fileLen = finode->size;
     if (offset >= fileLen)
     {

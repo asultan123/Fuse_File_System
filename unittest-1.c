@@ -237,52 +237,69 @@ START_TEST(statfs_test)
 }
 END_TEST
 
+START_TEST(bad_read_tests)
+{
+    ck_assert_int_eq( fs_ops.read( "/fred/abc/def/file.txt", file_bfr, 10, 0, NULL ), -ENOENT );
+    ck_assert_int_eq( fs_ops.read( "/dir3/subdir/file.12k/something else", file_bfr, 10, 0, NULL ), -ENOTDIR );
+    ck_assert_int_eq( fs_ops.read( "/dir3/subdir/something else", file_bfr, 10, 0, NULL ), -ENOENT );
+    ck_assert_int_eq( fs_ops.read( "/dir3/subdir", file_bfr, 10, 0, NULL ), -EISDIR );
+    ck_assert_int_eq( fs_ops.read( "/dir3/subdir/file.12k", file_bfr, 10, 1000000, NULL ), 0 );
+}
+END_TEST
+
 START_TEST(chmod_test)
 {
-    struct stat fileStat;
-    ck_assert_int_eq(fs_ops.getattr("/dir2", &fileStat), 0);
-    uint32_t mode = fileStat.st_mode;
-    ck_assert(S_ISDIR(mode));
-    uint32_t newmode = mode ^ 0xFFFFFFFF; // flips all bits, but chmod should only use the lower 9!
-    fs_ops.chmod("/dir2", newmode);
-    ck_assert_int_eq(fs_ops.getattr("/dir2", &fileStat), 0);
-    uint32_t updated_mode = fileStat.st_mode;
-    ck_assert(S_ISDIR(updated_mode));
-    ck_assert_int_eq(mode ^ 00777, updated_mode); // compares by checking that only lower 9 bits actually changed
-    fs_ops.chmod("/dir2", mode);                  // and reset it
+    // negative tests
+    ck_assert_int_eq(fs_ops.chmod( "/dir2/dir3", 0777), -ENOENT);
+    ck_assert_int_eq(fs_ops.chmod( "/dir1", 0777), -ENOENT);
 
-    ck_assert_int_eq(fs_ops.getattr("/dir2/file.4k+", &fileStat), 0);
+    // positive tests
+    struct stat fileStat;
+    ck_assert_int_eq( fs_ops.getattr( "/dir2", &fileStat ), 0 );
+    uint32_t mode = fileStat.st_mode;
+    ck_assert( S_ISDIR(mode) );
+    uint32_t newmode = mode ^ 0xFFFFFFFF;  // flips all bits, but chmod should only use the lower 9!
+    ck_assert_int_eq(fs_ops.chmod( "/dir2", newmode), 0);
+    ck_assert_int_eq( fs_ops.getattr( "/dir2", &fileStat ), 0 );
+    uint32_t updated_mode = fileStat.st_mode;
+    ck_assert( S_ISDIR(updated_mode) );
+    ck_assert_int_eq( mode ^ 00777, updated_mode ); // compares by checking that only lower 9 bits actually changed
+    ck_assert_int_eq( fs_ops.chmod( "/dir2", mode), 0);   // and reset it
+
+    ck_assert_int_eq( fs_ops.getattr( "/dir2/file.4k+", &fileStat ), 0 );
     mode = fileStat.st_mode;
-    ck_assert(!S_ISDIR(mode));
-    newmode = mode ^ 0xFFFFFFFF; // flips all bits, but chmod should only use the lower 9!
-    fs_ops.chmod("/dir2/file.4k+", newmode);
-    ck_assert_int_eq(fs_ops.getattr("/dir2/file.4k+", &fileStat), 0);
+    ck_assert( !S_ISDIR(mode) );
+    newmode = mode ^ 0xFFFFFFFF;  // flips all bits, but chmod should only use the lower 9!
+    ck_assert_int_eq( fs_ops.chmod( "/dir2/file.4k+", newmode), 0);
+    ck_assert_int_eq( fs_ops.getattr( "/dir2/file.4k+", &fileStat ), 0 );
     updated_mode = fileStat.st_mode;
-    ck_assert(!S_ISDIR(updated_mode));
-    ck_assert_int_eq(mode ^ 00777, updated_mode); // compares by checking that only lower 9 bits actually changed
-    fs_ops.chmod("/dir2/file.4k+", mode);         // and reset it
+    ck_assert( !S_ISDIR(updated_mode) );
+    ck_assert_int_eq( mode ^ 00777, updated_mode ); // compares by checking that only lower 9 bits actually changed
+    ck_assert_int_eq(fs_ops.chmod( "/dir2/file.4k+", mode), 0);   // and reset it
 }
 END_TEST
 
 START_TEST(rename_test)
 {
-    // bad tests
-    ck_assert_int_eq(fs_ops.rename("/dir2", "/dir3"), -EEXIST);
-    ck_assert_int_eq(fs_ops.rename("/dir1", "/dir4"), -ENOENT);
-    ck_assert_int_eq(fs_ops.rename("/dir2/file.4k+", "/dir3/new.file.name"), -EINVAL);
+    // negative tests
+    ck_assert_int_eq( fs_ops.rename( "/dir2", "/dir3"), -EEXIST );
+    ck_assert_int_eq( fs_ops.rename( "/dir1", "/dir4"), -ENOENT );
+    ck_assert_int_eq( fs_ops.rename( "/dir2/file.4k+", "/dir3/new.file.name"), -EINVAL );
 
-    ck_assert(fs_ops.read("/dir2/file.4k+", file_bfr, 20000, 0, NULL) > 0);
-    fs_ops.rename("/dir2/file.4k+", "/dir2/new.file.name");
-    ck_assert_int_eq(fs_ops.read("/dir2/file.4k+", file_bfr, 20000, 0, NULL), -ENOENT);
-    ck_assert(fs_ops.read("/dir2/new.file.name", file_bfr, 20000, 0, NULL) > 0);
-    fs_ops.rename("/dir2", "/dirGone");
-    ck_assert_int_eq(fs_ops.read("/dir2/new.file.name", file_bfr, 20000, 0, NULL), -ENOENT);
-    ck_assert(fs_ops.read("/dirGone/new.file.name", file_bfr, 20000, 0, NULL) > 0);
-    fs_ops.rename("/dirGone", "/dir2");
-    fs_ops.rename("/dir2/new.file.name", "/dir2/file.4k+");
-    ck_assert(fs_ops.read("/dir2/file.4k+", file_bfr, 20000, 0, NULL) > 0);
+    // positive tests
+    ck_assert( fs_ops.read( "/dir2/file.4k+", file_bfr, 20000, 0, NULL ) > 0 );
+    ck_assert_int_eq( fs_ops.rename( "/dir2/file.4k+", "/dir2/new.file.name"), 0 );
+    ck_assert_int_eq( fs_ops.read( "/dir2/file.4k+", file_bfr, 20000, 0, NULL ), -ENOENT );
+    ck_assert( fs_ops.read( "/dir2/new.file.name", file_bfr, 20000, 0, NULL ) > 0 );
+    ck_assert_int_eq(fs_ops.rename( "/dir2", "/dirGone"), 0 );
+    ck_assert_int_eq( fs_ops.read( "/dir2/new.file.name", file_bfr, 20000, 0, NULL ), -ENOENT );
+    ck_assert( fs_ops.read( "/dirGone/new.file.name", file_bfr, 20000, 0, NULL ) > 0 );
+    ck_assert_int_eq(fs_ops.rename( "/dirGone", "/dir2"), 0 );
+    ck_assert_int_eq(fs_ops.rename( "/dir2/new.file.name", "/dir2/file.4k+"), 0 );
+    ck_assert( fs_ops.read( "/dir2/file.4k+", file_bfr, 20000, 0, NULL ) > 0 );
 }
 END_TEST
+
 
 /* note that your tests will call:
  *  fs_ops.getattr(path, struct stat *sb)
@@ -304,6 +321,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, attr_test);        /* run fs_getattr to enumerate all values in reference image */
     tcase_add_test(tc, bad_dir_tests);    /* run fs_readdir against "bad" paths */
     tcase_add_test(tc, dir_test);         /* run fs_readdir to enumerate all values in reference image */
+    tcase_add_test(tc, bad_read_tests);   /* read tests, all at once, validates by known cksum */
     tcase_add_test(tc, big_read_tests);   /* read tests, all at once, validates by known cksum */
     tcase_add_test(tc, small_read_tests); /* read tests, in varying block sizes, validates by known cksum */
     tcase_add_test(tc, statfs_test);      /* statvfs tests */
