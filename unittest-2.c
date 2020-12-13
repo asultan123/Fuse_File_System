@@ -149,25 +149,27 @@ START_TEST(create_subdir_test)
 
     // TODO: DONT FORGET TO REMOVE THE LONG NAME DIRECTORY!!!
     // // cleanup...
-    // ck_assert_int_eq(fs_ops.unlink("/ins-dirs/dir1/file1.fil"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks - 10);
-
-    // ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir1/dir11"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks - 8);
-    // ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir2/dir21"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks - 6);
-    // ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir1"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks - 4);
-    // ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir2"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks - 2);
-    // ck_assert_int_eq(fs_ops.rmdir("/ins-dirs"), 0);
-    // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
-    // ck_assert_int_eq(fsstats.f_bavail, free_blocks);
+    ck_assert_int_eq(fs_ops.unlink("/ins-dirs/dir1/file1.fil"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 12);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir1/this-dir-name-is-way-too-lo"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 10);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir1/dir11"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 8);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir2/dir21"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 6);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir1"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 4);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs/dir2"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks - 2);
+    ck_assert_int_eq(fs_ops.rmdir("/ins-dirs"), 0);
+    ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
+    ck_assert_int_eq(fsstats.f_bavail, free_blocks);
 }
 END_TEST
 
@@ -583,7 +585,7 @@ int main(int argc, char **argv)
 
     /* add more tests here */
     tcase_add_test(tc, create_subdir_test); /* in root, in sub, and in sub/sub */
-    // tcase_add_test(tc, delete_subdir_test);           /* these also require the ability to create/unlink a file */
+    tcase_add_test(tc, delete_subdir_test);           /* these also require the ability to create/unlink a file */
     // tcase_add_test(tc, write_empty_test);             /* as above, but include files with data written to them */
     // tcase_add_test(tc, write_append_test);            /* as above, ensure blocks are freed appropriately */
     // tcase_add_test(tc, write_overwrite_test);

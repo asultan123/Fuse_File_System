@@ -398,7 +398,7 @@ struct fs_inode inode_from_mode(mode_t mode)
     return inode;
 }
 
-char* get_file_name_from_path(const char* path)
+char* get_entry_name_from_path(const char* path)
 {
     char *_dpath = strdup(path);
     char *dargv[MAX_PATH_LEN];
@@ -486,7 +486,7 @@ int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info 
     }
 
     // modify entry in dirblock    
-    char* filename  = get_file_name_from_path(path);
+    char* filename  = get_entry_name_from_path(path);
 
     dirBlock[freeDirEntry].valid = 1;
     strncpy(dirBlock[freeDirEntry].name, filename, MAX_NAME_LEN);
@@ -575,38 +575,31 @@ int find_index_in_dir(char* filename, struct fs_dirent* dirBlock, int* dirIdx)
     return -ENOENT;
 }
 
-/* unlink - delete a file
- *  success - return 0
- *  errors - path resolution, ENOENT, EISDIR
- */
-int fs_unlink(const char *path)
+int unlink_directory_entry(const char* path)
 {
-    /* your code here */
-    // remove file entry in parent directory
+     // remove file entry in parent directory
     struct fs_inode *dirInode;
     int status;
     if ((status = path_to_inode(path, &dirInode, 1)) < 0)
     {
         return status;
     }
-    struct fs_dirent* dirBlock;
-    status = validate_directory_and_entry(path, dirInode->mode, NULL, dirInode, &dirBlock);
-    if(status < 0 && status != -EEXIST)
+    int dirBlockInum = dirInode->ptrs[0];
+    struct fs_dirent dirBlock[MAX_DIR_ENTRIES_PER_BLOCK];
+    if((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
     {
         free(dirInode);
-        return -EEXIST;
-    }
-    int dirBlockInum = dirInode->ptrs[0];
-    free(dirInode);
-
-    char* filename = get_file_name_from_path(path);
-    int fileIdx;
-    if((status = find_index_in_dir(filename, dirBlock, &fileIdx)) < 0)
-    {
-        free(dirBlock);
         return status;
     }
-    free(filename);
+    free(dirInode);
+
+    char* entryname = get_entry_name_from_path(path);
+    int fileIdx;
+    if((status = find_index_in_dir(entryname, dirBlock, &fileIdx)) < 0)
+    {
+        return status;
+    }
+    free(entryname);
 
     // invalidate entry
     dirBlock[fileIdx].valid = 0;
@@ -614,13 +607,22 @@ int fs_unlink(const char *path)
     // writeback updated dirBlock
     if((status = block_write(dirBlock, dirBlockInum, 1)) < 0)
     {
-        free(dirBlock);
         return status;
     }
-    free(dirBlock);
 
+    return 0;
+}
+
+/* unlink - delete a file
+ *  success - return 0
+ *  errors - path resolution, ENOENT, EISDIR
+ */
+int fs_unlink(const char *path)
+{
+    /* your code here */
     // Collect allocated file block inums
     struct fs_inode *fileInode;
+    int status;
     if ((status = path_to_inode(path, &fileInode, 0)) < 0)
     {
         return status;
@@ -638,6 +640,12 @@ int fs_unlink(const char *path)
     }
     allocatedBlockInums[fileBlocksAllocated] = fileInodeInum;
     free(fileInode);
+
+    if((status = unlink_directory_entry(path)) < 0)
+    {
+        free(allocatedBlockInums);
+        return status;    
+    }
     
     // writeback deletions in bitmap
     if((status = modify_bitmap_and_writeback_to_disk(allocatedBlockInums, fileBlocksAllocated+1, 0)) < 0)
@@ -646,8 +654,10 @@ int fs_unlink(const char *path)
         return status;
     }
 
-    free(allocatedBlockInums);
+    statVfs.f_bfree = statVfs.f_bfree+fileBlocksAllocated+1;
+    statVfs.f_bavail = statVfs.f_bavail+fileBlocksAllocated+1;
 
+    free(allocatedBlockInums);
     return 0;
 }
 
@@ -693,6 +703,11 @@ int fs_rmdir(const char *path)
     {
         return status;
     }
+    if((status = unlink_directory_entry(path)) < 0)
+    {
+        return status;    
+    }
+
     int allocatedBlocks[2] = {dirInodeInum, dirBlockInum};
     if((status = modify_bitmap_and_writeback_to_disk(allocatedBlocks, 2, 0)))
     {
