@@ -307,6 +307,206 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
     return 0;
 }
 
+int validate_directory_and_entry(const char *path, mode_t mode, struct fuse_file_info *fi, struct fs_inode *dirInode, struct fs_dirent** dirBlock)
+{
+    if (!S_ISDIR(dirInode->mode))
+    {
+        return -ENOTDIR;
+    }
+    int dirBlockInum = dirInode->ptrs[0];
+    *dirBlock = malloc(sizeof(struct fs_dirent)*MAX_DIR_ENTRIES_PER_BLOCK);
+    int status;
+    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
+    {
+        free(*dirBlock);
+        return status;
+    }
+
+    char *_path = strdup(path);
+    char *argv[MAX_PATH_LEN];
+    int pathc = parse(_path, argv);
+    char *filename = argv[pathc - 1];
+
+    for (int entryIdx = 0; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
+    {
+        if ((*dirBlock)[entryIdx].valid)
+        {
+            if (strcmp((*dirBlock)[entryIdx].name, filename) == 0)
+            {
+                free(_path);
+                free(*dirBlock);
+                return -EEXIST;
+            }
+        }
+    }
+    free(_path);
+    return 0;
+}
+
+int find_free_dir_entry(struct fs_dirent* dirBlock, int startIdx, int* firstAvailableEntry)
+{
+    *firstAvailableEntry = -1;
+    for (int entryIdx = startIdx; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
+    {
+        if (!dirBlock[entryIdx].valid)
+        {
+            *firstAvailableEntry = entryIdx;
+        }
+    }
+
+    return (*firstAvailableEntry != -1) ? 0 : -ENOSPC;
+}
+
+int find_first_nfree_blocks(int startIdx, int n, int** allocatableBlkInum)
+{
+    int requestedBlockCount = n;
+    *allocatableBlkInum = malloc(sizeof(int)*superblock.disk_size); // dynamic structure would be better here
+
+    int allocatableBlkIdx = 0;
+    for (int blkIdx = startIdx; blkIdx < superblock.disk_size && requestedBlockCount > 0; blkIdx++)
+    {
+        if (bit_test(bitmap, blkIdx) == 0)
+        {
+            (*allocatableBlkInum)[allocatableBlkIdx++] = blkIdx;
+            requestedBlockCount--;
+        }
+    }
+
+    if(requestedBlockCount > 0)
+    {
+        free(*allocatableBlkInum);
+        return -ENOSPC;
+    }
+
+    return 0;
+}
+
+struct fs_inode inode_from_mode(mode_t mode)
+{
+    struct fs_inode inode;
+    struct fuse_context *ctx = fuse_get_context();
+
+    inode.uid = ctx->uid;
+    inode.gid = ctx->gid;
+    inode.mode = mode;
+    inode.ctime = time(NULL);
+    inode.mtime = time(NULL);
+    inode.size = (S_ISDIR(mode) ? 4096 : 0);
+    memset(inode.ptrs, 0, sizeof(inode.ptrs));
+
+    return inode;
+}
+
+char* get_file_name_from_path(const char* path)
+{
+    char *_dpath = strdup(path);
+    char *dargv[MAX_PATH_LEN];
+    int dpathc = parse(_dpath, dargv);
+    char* filename = calloc(1 , sizeof(char)*MAX_NAME_LEN);
+    strncpy(filename, dargv[dpathc-1], MAX_NAME_LEN);
+    free(_dpath);
+    return filename;
+}
+
+int set_bitmap_and_writeback_to_disk(int* allocatedBlockInums, int n)
+{
+    for(int allocationIdx = 0; allocationIdx < n; allocationIdx++)
+    {
+        int allocatedInum = allocatedBlockInums[allocationIdx];
+        bit_set(bitmap, allocatedInum);
+    }
+    int status;
+    if ((status = block_write(bitmap, 1, 1)) < 0)
+    {
+        return status;
+    }
+    return 0;
+}
+
+int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info *fi, int dirflag)
+{
+    struct fs_inode *dirInode;
+    int status;
+    if ((status = path_to_inode(path, &dirInode, 1)) < 0)
+    {
+        return status;
+    }
+    struct fs_dirent* dirBlock;
+    if((status = validate_directory_and_entry(path, mode, fi, dirInode, &dirBlock))<0)
+    {
+        free(dirInode);
+        return status;
+    }
+    int dirBlockInum = dirInode->ptrs[0];
+    free(dirInode);
+    int freeDirEntry;
+    if((status = find_free_dir_entry(dirBlock, 0, &freeDirEntry))<0)
+    {
+        free(dirBlock);
+        return status;
+    }
+
+    // 1 block for inode + (optional) 1 block for directory entries 
+    int allocationBlockCount = (dirflag)? 2 : 1; 
+    int* allocatableBlocksInums;
+    if((status = find_first_nfree_blocks(0, allocationBlockCount, &allocatableBlocksInums))<0)
+    {
+        free(dirBlock);
+        return status;
+    }
+    int newEntryInodeInum = allocatableBlocksInums[0];
+    int dirEntryBlockInum = allocatableBlocksInums[1];
+
+    // Create file inode
+    struct fs_inode newEntryInode = inode_from_mode(mode);
+
+    // set inode ptr to allocated direntry block (optional)
+    newEntryInode.ptrs[0] = (dirflag)? dirEntryBlockInum : 0; 
+
+    // writeback file inode
+    if ((status = block_write(&newEntryInode, newEntryInodeInum, 1)) < 0)
+    {
+        free(dirBlock);
+        return status;
+    }
+
+    // modify entry in dirblock    
+    char* filename = get_file_name_from_path(path);
+    dirBlock[freeDirEntry].valid = 1;
+    strncpy(dirBlock[freeDirEntry].name, filename, MAX_NAME_LEN);
+    free(filename);
+    dirBlock[freeDirEntry].inode = newEntryInodeInum;
+
+    // writeback updated dir block
+    if ((status = block_write(dirBlock, dirBlockInum, 1)) < 0)
+    {
+        free(dirBlock);
+        return status;
+    }
+    free(dirBlock);
+
+    // zero out dir entries
+    if(dirflag)
+    {
+        char zeros[FS_BLOCK_SIZE] = {0};
+        if ((status = block_write(zeros, dirEntryBlockInum, 1)) < 0)
+        {
+            free(allocatableBlocksInums);
+            return status;
+        }            
+    }
+    
+    // modify bitmap and writeback bitmap
+    if ((status = set_bitmap_and_writeback_to_disk(allocatableBlocksInums, allocationBlockCount)) < 0)
+    {
+        free(allocatableBlocksInums);
+        return status;
+    }    
+    
+    free(allocatableBlocksInums);
+    return 0;
+}
+
 /* create - create a new file with specified permissions
  *
  * success - return 0
@@ -323,87 +523,7 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
  */
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-    struct fs_inode *dirInode;
-    int status;
-    if ((status = path_to_inode(path, &dirInode, 1)) < 0)
-    {
-        return status;
-    }
-    if(!S_ISDIR(dirInode->mode))
-    {
-        free(dirInode);
-        return -ENOTDIR;
-    }
-    int dirBlockInum = dirInode->ptrs[0];
-    struct fs_dirent dirBlock[MAX_DIR_ENTRIES_PER_BLOCK];
-    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
-    {
-        free(dirInode);
-        return status;
-    }
-
-    char *_path = strdup(path);
-    char *argv[MAX_PATH_LEN];
-    int pathc = parse(_path, argv);
-    char* filename = argv[pathc-1];
-
-    for(int entryIdx = 0; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
-    {
-        if(dirBlock[entryIdx].valid)
-        {
-            if (strcmp(dirBlock[entryIdx].name, filename) == 0)
-            {
-                free(dirInode);
-                free(_path);
-                return -EEXIST;
-            }
-        }
-    }
-
-    int firstAvailableEntry = -1;
-    for(int entryIdx = 0; entryIdx < MAX_DIR_ENTRIES_PER_BLOCK; entryIdx++)
-    {
-        if(!dirBlock[entryIdx].valid)
-        {
-            firstAvailableEntry = entryIdx;
-        }
-    }
-
-    if(firstAvailableEntry == -1)
-    {
-        free(dirInode);
-        free(_path);       
-        return -ENOSPC;
-    }
-
-    int allocatableBlkInum = -1;
-    for(int blkIdx = 0; blkIdx < superblock.disk_size; blkIdx++)
-    {
-        if(bit_test(bitmap, blkIdx) == 0)
-        {
-            allocatableBlkInum = blkIdx;
-        }
-    }
-
-    if(allocatableBlkInum == -1)
-    {
-        free(dirInode);
-        free(_path);       
-        return -ENOSPC;
-    }
-
-    // Create file inode
-    struct fs_inode newfileInode;
-
-    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
-    {
-        free(dirInode);
-        return status;
-    }    
-
-    free(dirInode);
-    free(_path);
-    return 0;    
+    return create_directory_entry(path, mode, fi, 0);
 }
 
 /* mkdir - create a directory with the given mode.
@@ -417,8 +537,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  */
 int fs_mkdir(const char *path, mode_t mode)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    return create_directory_entry(path, mode, NULL, 1);
 }
 
 /* unlink - delete a file
