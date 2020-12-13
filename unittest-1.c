@@ -305,10 +305,10 @@ int main(int argc, char **argv)
     tcase_add_test(tc, bad_dir_tests);    /* run fs_readdir against "bad" paths */
     tcase_add_test(tc, dir_test);         /* run fs_readdir to enumerate all values in reference image */
     tcase_add_test(tc, big_read_tests);   /* read tests, all at once, validates by known cksum */
-    // tcase_add_test(tc, small_read_tests); /* read tests, in varying block sizes, validates by known cksum */
+    tcase_add_test(tc, small_read_tests); /* read tests, in varying block sizes, validates by known cksum */
     tcase_add_test(tc, statfs_test);      /* statvfs tests */
-    // tcase_add_test(tc, chmod_test);       /* chmod tests */
-    // tcase_add_test(tc, rename_test);       /* rename tests */
+    tcase_add_test(tc, chmod_test);       /* chmod tests */
+    tcase_add_test(tc, rename_test);       /* rename tests */
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
@@ -319,5 +319,6 @@ int main(int argc, char **argv)
     printf("%d tests failed\n", n_failed);
 
     srunner_free(sr);
+
     return (n_failed == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

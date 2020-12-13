@@ -88,7 +88,7 @@ void *fs_init(struct fuse_conn_info *conn)
     unsigned int blocksFree = 0;
     for (int i = 0; i < superblock.disk_size; i++)
     {
-        blocksFree += ((bit_test(bitmap, i) == 0)? 1 : 0);
+        blocksFree += ((bit_test(bitmap, i) == 0) ? 1 : 0);
     }
     statVfs.f_bfree = blocksFree;
     statVfs.f_bavail = statVfs.f_bfree;
@@ -98,7 +98,7 @@ void *fs_init(struct fuse_conn_info *conn)
     printf("INFO: Block Size: %u\n", FS_BLOCK_SIZE);
     printf("INFO: Disk MAGIC: %u\n", superblock.magic);
     printf("INFO: Disk Size: %u\n", superblock.disk_size);
-    printf("INFO: Blocks Used: %u\n", superblock.disk_size-blocksFree);
+    printf("INFO: Blocks Used: %u\n", superblock.disk_size - blocksFree);
     printf("INFO: Blocks Available: %lu\n", statVfs.f_bfree);
     printf("INFO: Blocks Free: %lu\n", statVfs.f_bfree);
 
@@ -121,7 +121,7 @@ int translate(int pathc, char **pathv, int depth)
     // MAX 128 entries in a directory assumption
     struct fs_dirent curDir[MAX_DIR_ENTRIES_PER_BLOCK];
     int inodeIndex = 2;
-    depth = depth & MAX_PATH_LEN;
+    depth = (depth <= pathc) ? depth : pathc;
     for (int pathToken = 0; pathToken < pathc - depth; pathToken++)
     {
         if ((status = block_read(&curInode, inodeIndex, 1)) < 0)
@@ -214,12 +214,15 @@ int path_to_inode(const char *path, struct fs_inode **inode, int depth)
     int inum;
     if ((inum = translate(pathc, argv, depth)) < 0)
     {
+        free(_path);
         return inum;
     }
     *inode = malloc(sizeof(struct fs_inode));
     int status;
     if ((status = block_read(*inode, inum, 1)) < 0)
     {
+        free(_path);
+        free(inode);
         return status;
     }
     free(_path);
@@ -278,11 +281,13 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
     }
     if (!(S_ISDIR(inode->mode)))
     {
+        free(inode);
         return -ENOTDIR;
     }
     struct fs_dirent curDir[MAX_DIR_ENTRIES_PER_BLOCK];
     if ((status = block_read(curDir, inode->ptrs[0], 1) < 0))
     {
+        free(inode);
         return status;
     }
     for (int dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
@@ -291,6 +296,7 @@ int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
         {
             if ((status = block_read(inode, curDir[dirEntry].inode, 1)) < 0)
             {
+                free(inode);
                 return status;
             }
             inode_to_stat(inode, &fileStat);
@@ -356,33 +362,40 @@ int fs_rmdir(const char *path)
     return -EOPNOTSUPP;
 }
 
-
-int file_dir(struct fs_dirent** dir, struct fs_dirent** resolvedEntry, const char* file_path)
+int file_dir(struct fs_dirent **dir, struct fs_dirent **resolvedEntry, const char *file_path)
 {
     int status;
-    struct fs_inode* fileDirInode;
-    if((status = path_to_inode(file_path, &fileDirInode, 1)) < 0)
+    struct fs_inode *fileDirInode;
+    if ((status = path_to_inode(file_path, &fileDirInode, 1)) < 0)
     {
         return status;
     }
-    *dir = malloc(sizeof(struct fs_dirent)*MAX_DIR_ENTRIES_PER_BLOCK);
-    int fileDirBlockLBA = fileDirInode->ptrs[0];
-    if((status = block_read((*dir), fileDirBlockLBA, 1)) < 0)
+    if (!S_ISDIR(fileDirInode->mode))
     {
+        free(fileDirInode);
+        return -ENOTDIR;
+    }
+    *dir = malloc(sizeof(struct fs_dirent) * MAX_DIR_ENTRIES_PER_BLOCK);
+    int fileDirBlockLBA = fileDirInode->ptrs[0];
+    if ((status = block_read((*dir), fileDirBlockLBA, 1)) < 0)
+    {
+        free(fileDirInode);
+        free(*dir);
+        *dir = NULL;
         return status;
     }
 
     char *_path = strdup(file_path);
     char *argv[MAX_PATH_LEN];
     int pathc = parse(_path, argv);
-    char* filename = argv[pathc-1];
+    char *filename = argv[pathc - 1];
     *resolvedEntry = NULL;
     int dirEntry;
-    for(dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
+    for (dirEntry = 0; dirEntry < MAX_DIR_ENTRIES_PER_BLOCK; dirEntry++)
     {
-        if((*dir)[dirEntry].valid)
+        if ((*dir)[dirEntry].valid)
         {
-            if(strcmp((*dir)[dirEntry].name, filename) == 0)
+            if (strcmp((*dir)[dirEntry].name, filename) == 0)
             {
                 *resolvedEntry = &((*dir)[dirEntry]);
                 break;
@@ -391,7 +404,7 @@ int file_dir(struct fs_dirent** dir, struct fs_dirent** resolvedEntry, const cha
     }
     free(_path);
     free(fileDirInode);
-    if(resolvedEntry == NULL)
+    if (resolvedEntry == NULL)
     {
         free(*dir);
         *dir = NULL;
@@ -419,19 +432,21 @@ int file_dir(struct fs_dirent** dir, struct fs_dirent** resolvedEntry, const cha
 int fs_rename(const char *src_path, const char *dst_path)
 {
     /* your code here */
-    struct fs_inode* sinode;
+    struct fs_inode *sinode;
     int sinum;
-    if((sinum = path_to_inode(src_path, &sinode, 0)) < 0)
+    if ((sinum = path_to_inode(src_path, &sinode, 0)) < 0)
     {
         return sinum;
     }
-    struct fs_inode* dinode;
+    struct fs_inode *dinode;
     int dinum;
-    if((dinum = path_to_inode(src_path, &dinode, 0)) >= 0)
+    if ((dinum = path_to_inode(dst_path, &dinode, 0)) >= 0)
     {
+        free(dinode);
+        free(sinode);
         return -EEXIST;
     }
-    
+
     char *_spath = strdup(src_path);
     char *sargv[MAX_PATH_LEN];
     int spathc = parse(_spath, sargv);
@@ -440,41 +455,50 @@ int fs_rename(const char *src_path, const char *dst_path)
     char *dargv[MAX_PATH_LEN];
     int dpathc = parse(_dpath, dargv);
 
-    if(dpathc != spathc)
+    if (dpathc != spathc)
     {
+        free(sinode);
+        free(_spath);
+        free(_dpath);
         return -EINVAL;
     }
 
-    for(int pathToken = 0; pathToken < spathc-1; pathToken++)
+    for (int pathToken = 0; pathToken < spathc - 1; pathToken++)
     {
-        if(strcmp(sargv[pathToken], dargv[pathToken]) != 0)
+        if (strcmp(sargv[pathToken], dargv[pathToken]) != 0)
         {
+            free(sinode);
+            free(_spath);
+            free(_dpath);
             return -EINVAL;
         }
     }
 
-    struct fs_dirent* sfileDirEntry;
-    struct fs_dirent* sfileDirBlock;
+    struct fs_dirent *sfileDirEntry;
+    struct fs_dirent *sfileDirBlock;
     int sfileDirLBA;
 
-    if((sfileDirLBA = file_dir(&sfileDirBlock, &sfileDirEntry, src_path)) < 0)
+    if ((sfileDirLBA = file_dir(&sfileDirBlock, &sfileDirEntry, src_path)) < 0)
     {
+        free(sinode);
+        free(_spath);
+        free(_dpath);
         return sfileDirLBA;
     }
 
     memset(sfileDirEntry->name, 0, sizeof(sfileDirEntry->name));
-    strncpy(sfileDirEntry->name, dargv[dpathc-1], MAX_NAME_LEN);
+    strncpy(sfileDirEntry->name, dargv[dpathc - 1], MAX_NAME_LEN);
 
     int status;
-    if((status = block_write(sfileDirBlock, sfileDirLBA, 1)) < 0)
+    if ((status = block_write(sfileDirBlock, sfileDirLBA, 1)) < 0)
     {
         return status;
     }
 
-    free(sinode);
-    free(dinode);
     free(_spath);
     free(_dpath);
+    free(sfileDirBlock);
+    free(sinode);
     return 0;
 }
 
@@ -492,14 +516,11 @@ int fs_chmod(const char *path, mode_t mode)
     {
         return inum;
     }
-    if(!S_ISREG(mode))
-    {
-        return -EINVAL;
-    }
-    finode->mode = mode;
+    uint32_t permissionsMask = 0b111111111;
+    finode->mode = (finode->mode & ~permissionsMask) | (mode & permissionsMask);
     int status;
-    if((status = block_write(finode, inum, 0)) < 0)
-    { 
+    if ((status = block_write(finode, inum, 1)) < 0)
+    {
         return status;
     }
     free(finode);
@@ -566,26 +587,26 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     if (offset + len > fileLen)
     {
         readEndBlock = fileSizeInBlocks;
-        len = fileLen;
+        len = fileLen - offset;
     }
 
     int readBlockCount = readEndBlock - readStartBlock + 1;
     char *blkBuf = calloc(1, sizeof(char) * FS_BLOCK_SIZE * readBlockCount);
-    if(blkBuf == NULL)
+    if (blkBuf == NULL)
     {
         return -ENOMEM;
     }
 
     int blkIdx = 0;
-    for(int pIdx = readStartBlock; pIdx <= readEndBlock; pIdx++)
+    for (int pIdx = readStartBlock; pIdx <= readEndBlock; pIdx++)
     {
-        if ((status = block_read(blkBuf+(blkIdx++*FS_BLOCK_SIZE), finode->ptrs[pIdx], 1)) < 0)
+        if ((status = block_read(blkBuf + (blkIdx++ * FS_BLOCK_SIZE), finode->ptrs[pIdx], 1)) < 0)
         {
             return status;
         }
     }
 
-    memcpy(buf, blkBuf+readStartOffset, len);
+    memcpy(buf, blkBuf + readStartOffset, len);
 
     free(blkBuf);
     free(finode);
