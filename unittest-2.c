@@ -146,6 +146,8 @@ START_TEST(create_subdir_test)
     {
         validate_directory(test_names[t], test_tables[t]);
     }
+
+    // TODO: DONT FORGET TO REMOVE THE LONG NAME DIRECTORY!!!
     // // cleanup...
     // ck_assert_int_eq(fs_ops.unlink("/ins-dirs/dir1/file1.fil"), 0);
     // ck_assert_int_eq(fs_ops.statfs("/", &fsstats), 0);
