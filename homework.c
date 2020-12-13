@@ -407,7 +407,7 @@ char* get_entry_name_from_path(const char* path)
     {
         return NULL;
     }
-    char* filename = calloc(1 , sizeof(char)*MAX_NAME_LEN);
+    char* filename = calloc(1 , sizeof(char)*MAX_NAME_LEN+1);
     strncpy(filename, dargv[dpathc-1], MAX_NAME_LEN);
     free(_dpath);
     return filename;
@@ -931,11 +931,13 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     }
     if(!S_ISREG(finode->mode))
     {
+        free(finode);
         return -EISDIR;
     }
     int fileLen = finode->size;
     if (offset >= fileLen)
     {
+        free(finode);
         return 0;
     }
 
