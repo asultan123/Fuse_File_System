@@ -5,9 +5,9 @@
 CFLAGS = -ggdb3 -Wall -O0
 LDLIBS = -lcheck -lz -lm -lsubunit -lrt -lpthread -lfuse
 
-unittest-1: unittest-1.o homework.o misc.o
-
 unittest-2: unittest-2.o homework.o misc.o
+
+unittest-1: unittest-1.o homework.o misc.o
 
 hwfuse: misc.o homework.o hwfuse.o
 

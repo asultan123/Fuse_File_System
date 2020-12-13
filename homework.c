@@ -316,7 +316,7 @@ int validate_directory_and_entry(const char *path, mode_t mode, struct fuse_file
     int dirBlockInum = dirInode->ptrs[0];
     *dirBlock = malloc(sizeof(struct fs_dirent)*MAX_DIR_ENTRIES_PER_BLOCK);
     int status;
-    if ((status = block_read(dirBlock, dirBlockInum, 1)) < 0)
+    if ((status = block_read(*dirBlock, dirBlockInum, 1)) < 0)
     {
         free(*dirBlock);
         return status;
@@ -351,6 +351,7 @@ int find_free_dir_entry(struct fs_dirent* dirBlock, int startIdx, int* firstAvai
         if (!dirBlock[entryIdx].valid)
         {
             *firstAvailableEntry = entryIdx;
+            break;
         }
     }
 
@@ -402,6 +403,10 @@ char* get_file_name_from_path(const char* path)
     char *_dpath = strdup(path);
     char *dargv[MAX_PATH_LEN];
     int dpathc = parse(_dpath, dargv);
+    if(strlen(dargv[dpathc-1]) > MAX_NAME_LEN)
+    {
+        return NULL;
+    }
     char* filename = calloc(1 , sizeof(char)*MAX_NAME_LEN);
     strncpy(filename, dargv[dpathc-1], MAX_NAME_LEN);
     free(_dpath);
@@ -458,6 +463,7 @@ int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info 
     int dirEntryBlockInum = allocatableBlocksInums[1];
 
     // Create file inode
+    mode = (dirflag)? mode | __S_IFDIR : mode;
     struct fs_inode newEntryInode = inode_from_mode(mode);
 
     // set inode ptr to allocated direntry block (optional)
@@ -466,12 +472,14 @@ int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info 
     // writeback file inode
     if ((status = block_write(&newEntryInode, newEntryInodeInum, 1)) < 0)
     {
+        free(allocatableBlocksInums);
         free(dirBlock);
         return status;
     }
 
     // modify entry in dirblock    
-    char* filename = get_file_name_from_path(path);
+    char* filename  = get_file_name_from_path(path);
+
     dirBlock[freeDirEntry].valid = 1;
     strncpy(dirBlock[freeDirEntry].name, filename, MAX_NAME_LEN);
     free(filename);
@@ -481,6 +489,7 @@ int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info 
     if ((status = block_write(dirBlock, dirBlockInum, 1)) < 0)
     {
         free(dirBlock);
+        free(allocatableBlocksInums);
         return status;
     }
     free(dirBlock);
@@ -497,6 +506,8 @@ int create_directory_entry(const char *path, mode_t mode, struct fuse_file_info 
     }
     
     // modify bitmap and writeback bitmap
+    statVfs.f_bfree = (dirflag)? statVfs.f_bfree-2 : statVfs.f_bfree-1;
+    statVfs.f_bavail = (dirflag)? statVfs.f_bavail-2 : statVfs.f_bavail-1;
     if ((status = set_bitmap_and_writeback_to_disk(allocatableBlocksInums, allocationBlockCount)) < 0)
     {
         free(allocatableBlocksInums);
