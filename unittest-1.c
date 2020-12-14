@@ -207,7 +207,7 @@ START_TEST(small_read_tests)
 {
     int incr[] = {17, 100, 1000, 1024, 1970, 3000, -1};
 
-    for (int *inc = incr; *inc > 0; inc++) // -1 not tested
+    for (int *inc = incr; *inc > 0; inc++) 
     {
         for (struct file_test_data *f = file_data_table; f->path[0] != '\0'; f++)
         {
