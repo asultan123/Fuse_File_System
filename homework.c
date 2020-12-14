@@ -957,6 +957,8 @@ int fs_truncate(const char *path, off_t len)
 
     statVfs.f_bfree = statVfs.f_bfree + blockRemovalCount; 
     statVfs.f_bavail = statVfs.f_bavail + blockRemovalCount; 
+
+    free(allocatedBlockInodes);
     /* your code here */
     return 0;
 }
