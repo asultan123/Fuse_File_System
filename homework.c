@@ -1086,7 +1086,7 @@ int fs_write(const char *path, const char *buf, size_t len,
     int writeBlockCount = writeEndBlock - writeStartBlock + 1;
 
     // allocate additional blocks if necessary
-    int blksNeeded = writeStartBlock + writeBlockCount - fileSizeInBlocks;
+    int blksNeeded = writeEndBlock - fileSizeInBlocks + 1;
     if(blksNeeded > 0)
     {
         // update bitmap first to reserve and prevent unintended access to data

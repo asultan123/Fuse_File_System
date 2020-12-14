@@ -1,0 +1,60 @@
+DeMastri Approach
+---- 8-Dec-20 - DeMastri
+ - created working branch and progress file
+ - part 1 outline:
+ -  init, then read dir, then read files, then rename, then chmod, then utime
+ - readdir and getattr nominally working but needs significant cleanup
+---- 9-Dec-20 - DeMastri
+ - part 1 complete and testing is done, needs some refactoring around common translate / get inode code
+---- 10-Dec-20 - DeMastri
+ - started on part 2 - mddir, rmdir, create, unlink all complete and testing is done
+ - everything needs some refactoring
+---- 11-Dec-20 - DeMastri
+ - completed part 2 - write, truncate - not sure about mknod
+ - negative tests for write and truncate still to be written
+ - everything still needs some refactoring
+---- 12-Dec-20 - DeMastri
+ - completed part 2 - confirmed with prof jump that mknod is _internal_ don't need to write explicitly
+ - negative tests for write and truncate complete
+ - added a few negative tests for read and chmod as well
+---- 13-Dec-20 - DeMastri
+- changes/bugs suggested by aly - statvfs_f_blocks is now correct, and too long
+files are trunc'd but pass
+
+Sultan Approach
+---- 11-Dec-20 - Sultan
+ - Completed path traversal
+ - Tentative Implementation 
+    -- readdir
+    -- getattr
+    -- rename
+    -- read
+    -- chmod
+ - Validation with DeMastri unittests-1
+    -- tests failing:
+        --- small_read
+        --- chmod 
+        --- rename
+---- 12-Dec-20 - Sultan
+ - Fixed bugs in chmod, rename, read, all unittests-1 pass
+ - Tentative Implementation
+    -- create
+    -- mkdir
+    -- unlink
+    -- rmdir
+ - Validation with DeMastri unittests-2
+    -- all Implementations pass
+ - Updated unittests-1 with new negatives, all pass
+ - valgrind check, no leak for unittest-1 and unittest-2
+ - suggested to DeMastri: fix for statvfs blcok return value 
+ - suggested to DeMastri: allowing long names with truncation
+---- 13-Dec-20 - Sultan
+ - Tentative Implementation
+    -- write
+    -- truncate
+    -- utime
+ - Validation with DeMastri unittests-2
+    -- unittest fix for fs_write return (number of bytes written is returned on success)
+    -- all Implementations pass
+ - Merged Sultan solution + DeMastri unittests into master
+
