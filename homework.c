@@ -891,7 +891,28 @@ int fs_chmod(const char *path, mode_t mode)
 int fs_utime(const char *path, struct utimbuf *ut)
 {
     /* your code here */
-    return -EOPNOTSUPP;
+    struct fs_inode *finode;
+    int status;
+    if ((status = path_to_inode(path, &finode, 0)) < 0)
+    {
+        return status;
+    }
+    if (!S_ISREG(finode->mode))
+    {
+        free(finode);
+        return -EISDIR;
+    }
+    int finodeInum = status;
+
+    finode->mtime = ut->modtime;
+
+    if((status = block_write(finode, finodeInum, 1)) < 0)
+    {
+        free(finode);
+        return status;
+    }
+
+    return 0;
 }
 
 /* truncate - truncate file to exactly 'len' bytes
@@ -954,7 +975,7 @@ int fs_truncate(const char *path, off_t len)
         free(allocatedBlockInodes);
         return status;
     }
-
+ 
     statVfs.f_bfree = statVfs.f_bfree + blockRemovalCount; 
     statVfs.f_bavail = statVfs.f_bavail + blockRemovalCount; 
 
