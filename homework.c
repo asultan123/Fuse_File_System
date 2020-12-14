@@ -1028,6 +1028,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     char *blkBuf = calloc(1, sizeof(char) * FS_BLOCK_SIZE * readBlockCount);
     if (blkBuf == NULL)
     {
+        free(finode);
         return -ENOMEM;
     }
 
@@ -1036,6 +1037,8 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
     {
         if ((status = block_read(blkBuf + (blkIdx++ * FS_BLOCK_SIZE), finode->ptrs[pIdx], 1)) < 0)
         {
+            free(finode);
+            free(blkBuf);
             return status;
         }
     }
